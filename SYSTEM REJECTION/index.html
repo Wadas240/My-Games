@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SYSTEM REJECTION</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+        body {
+            margin: 0;
+            background-color: #0000aa; /* BSOD Blue */
+            color: white;
+            font-family: 'VT323', monospace;
+            overflow: hidden;
+            cursor: none; /* ซ่อนเมาส์จริง */
+            user-select: none;
+        }
+
+        #game-container {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #111;
+            transition: transform 0.1s;
+        }
+
+        /* Fake Cursor */
+        #cursor {
+            position: absolute;
+            width: 20px; height: 20px;
+            border: 2px solid #00ff00;
+            background: rgba(0, 255, 0, 0.2);
+            transform: translate(-50%, -50%);
+            pointer-events: none; /* คลิกทะลุ */
+            z-index: 9999;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #00ff00;
+        }
+        #cursor::after {
+            content: '+'; position: absolute; top: -5px; left: 4px; color: #00ff00;
+        }
+
+        /* Target Button */
+        .fix-btn {
+            position: absolute;
+            padding: 10px 20px;
+            background: red;
+            color: white;
+            border: 2px solid white;
+            font-family: 'VT323', monospace;
+            font-size: 24px;
+            cursor: none;
+            box-shadow: 5px 5px 0px #550000;
+            transition: 0.1s;
+        }
+        .fix-btn:active { transform: scale(0.9); }
+
+        /* Stability Bar */
+        #bar-container {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            width: 400px; height: 30px; border: 2px solid white; background: #000;
+        }
+        #stability-bar {
+            width: 100%; height: 100%; background: #00ff00;
+            transition: width 0.1s linear, background 0.5s;
+        }
+
+        /* Glitch Text */
+        .popup {
+            position: absolute;
+            background: white; color: black; border: 1px solid blue;
+            padding: 5px; font-size: 14px; pointer-events: none;
+            box-shadow: 5px 5px 0 rgba(0,0,0,0.5);
+        }
+
+        /* Overlay */
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 10000;
+        }
+        
+        .scanline {
+            position: fixed; left: 0; top: 0; width: 100%; height: 100%;
+            background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.2));
+            background-size: 100% 4px; pointer-events: none; z-index: 9998;
+        }
+
+        h1 { font-size: 60px; margin: 0; color: red; text-shadow: 2px 2px 0 white; }
+        button.start {
+            font-size: 30px; padding: 10px 40px; background: white; border: none; cursor: pointer;
+            font-family: 'VT323', monospace; margin-top: 20px;
+        }
+        button.start:hover { background: #ccc; }
+
+        /* Animations */
+        @keyframes shake {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            10% { transform: translate(-1px, -2px) rotate(-1deg); }
+            20% { transform: translate(-3px, 0px) rotate(1deg); }
+            30% { transform: translate(3px, 2px) rotate(0deg); }
+            40% { transform: translate(1px, -1px) rotate(1deg); }
+            50% { transform: translate(-1px, 2px) rotate(-1deg); }
+            60% { transform: translate(-3px, 1px) rotate(0deg); }
+            70% { transform: translate(3px, 1px) rotate(-1deg); }
+            80% { transform: translate(-1px, -1px) rotate(1deg); }
+            90% { transform: translate(1px, 2px) rotate(0deg); }
+            100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+        .shake-screen { animation: shake 0.5s; animation-iteration-count: infinite; }
+
+    </style>
+</head>
+<body>
+
+<div class="scanline"></div>
+
+<div id="game-container">
+    <div id="bar-container">
+        <div id="stability-bar"></div>
+    </div>
+    <div style="position:absolute; top: 55px; width: 100%; text-align: center; color: #aaa;">SYSTEM STABILITY</div>
+    <div id="score" style="position:absolute; top: 20px; left: 20px; font-size: 30px;">FIXES: 0</div>
+    <div id="curse-list" style="position:absolute; top: 20px; right: 20px; text-align: right; font-size: 20px; color: red;"></div>
+    
+    <div id="cursor"></div>
+    <button id="target-btn" class="fix-btn">FIX_SYS.EXE</button>
+</div>
+
+<div id="overlay">
+    <h1>SYSTEM REJECTION</h1>
+    <p style="font-size: 24px; max-width: 600px; text-align: center;">
+        WARNING: Input devices compromised.<br>
+        Click 'FIX_SYS.EXE' to stabilize.<br>
+        Expect resistance.
+    </p>
+    <button class="start" onclick="startGame()">INITIALIZE</button>
+</div>
+
+<script>
+    // Elements
+    const container = document.getElementById('game-container');
+    const cursor = document.getElementById('cursor');
+    const targetBtn = document.getElementById('target-btn');
+    const bar = document.getElementById('stability-bar');
+    const overlay = document.getElementById('overlay');
+    const curseList = document.getElementById('curse-list');
+    
+    // State
+    let gameRunning = false;
+    let stability = 100;
+    let score = 0;
+    let curses = [];
+    
+    // Mouse Pos
+    let realX = window.innerWidth / 2;
+    let realY = window.innerHeight / 2;
+    let fakeX = realX;
+    let fakeY = realY;
+    
+    // Physics for "Drift" curse
+    let velX = 0, velY = 0;
+
+    // Curses Configuration
+    const CURSE_TYPES = [
+        { id: 'INVERT_X', name: 'AXIS_X_CORRUPT' },
+        { id: 'INVERT_Y', name: 'AXIS_Y_CORRUPT' },
+        { id: 'LAG', name: 'INPUT_LAG_DETECTED' },
+        { id: 'SHAKE', name: 'VIDEO_DRIVER_FAIL' },
+        { id: 'DRIFT', name: 'SENSOR_DRIFT' },
+        { id: 'BLINK', name: 'SIGNAL_LOST' },
+        { id: 'POPUP', name: 'ADWARE_INFECTED' }
+    ];
+
+    // --- AUDIO (Synthesized Noise) ---
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(type) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.connect(g); g.connect(audioCtx.destination);
+        
+        const now = audioCtx.currentTime;
+        
+        if(type === 'click') {
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(800, now);
+            osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+            g.gain.setValueAtTime(0.1, now);
+            g.gain.linearRampToValueAtTime(0, now + 0.1);
+            osc.start(now); osc.stop(now + 0.1);
+        } else if (type === 'error') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(100, now);
+            osc.frequency.linearRampToValueAtTime(50, now + 0.5);
+            g.gain.setValueAtTime(0.2, now);
+            g.gain.linearRampToValueAtTime(0, now + 0.5);
+            osc.start(now); osc.stop(now + 0.5);
+        } else if (type === 'warning') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(1000, now);
+            g.gain.setValueAtTime(0.05, now);
+            g.gain.linearRampToValueAtTime(0, now + 0.1);
+            osc.start(now); osc.stop(now + 0.1);
+        }
+    }
+
+    // --- INPUT HANDLING ---
+    document.addEventListener('mousemove', (e) => {
+        if (!gameRunning) return;
+        realX = e.clientX;
+        realY = e.clientY;
+    });
+
+    // Check click manually because elementFromPoint needs fake coords
+    document.addEventListener('mousedown', () => {
+        if (!gameRunning) return;
+        
+        const rect = targetBtn.getBoundingClientRect();
+        // Check if Fake Cursor is over the button
+        if (fakeX >= rect.left && fakeX <= rect.right &&
+            fakeY >= rect.top && fakeY <= rect.bottom) {
+            fixSystem();
+        } else {
+            // Clicked empty space -> Penalty
+            stability -= 5;
+            playSound('error');
+            createPopup("INVALID_INPUT");
+        }
+    });
+
+    function moveButton() {
+        const pad = 50;
+        const x = Math.random() * (window.innerWidth - 150) + pad;
+        const y = Math.random() * (window.innerHeight - 100) + pad;
+        targetBtn.style.left = x + 'px';
+        targetBtn.style.top = y + 'px';
+    }
+
+    function fixSystem() {
+        stability = Math.min(100, stability + 25);
+        score++;
+        document.getElementById('score').innerText = `FIXES: ${score}`;
+        playSound('click');
+        moveButton();
+        
+        // Add Curse every 3 points
+        if (score % 3 === 0) addCurse();
+    }
+
+    function addCurse() {
+        // Find a curse we don't have yet (or stack drift/lag)
+        const available = CURSE_TYPES.filter(c => !curses.includes(c.id) || c.id === 'POPUP');
+        if(available.length > 0) {
+            const newCurse = available[Math.floor(Math.random() * available.length)];
+            if(newCurse.id !== 'POPUP') {
+                curses.push(newCurse.id);
+                const el = document.createElement('div');
+                el.innerText = newCurse.name;
+                curseList.appendChild(el);
+            } else {
+                // Popups happen automatically later
+                curses.push('POPUP');
+            }
+            playSound('error');
+            document.body.style.backgroundColor = score % 2 === 0 ? "#550000" : "#000055"; // Flash bg
+            setTimeout(()=> document.body.style.backgroundColor = "#111", 100);
+        }
+    }
+
+    function createPopup(text) {
+        const p = document.createElement('div');
+        p.className = 'popup';
+        p.innerText = text || "ERROR " + Math.floor(Math.random()*9999);
+        p.style.left = Math.random() * window.innerWidth + 'px';
+        p.style.top = Math.random() * window.innerHeight + 'px';
+        container.appendChild(p);
+        setTimeout(() => p.remove(), 2000);
+    }
+
+    // --- CORE LOOP ---
+    function update() {
+        if (!gameRunning) return;
+
+        // 1. Decay
+        const decayRate = 0.1 + (score * 0.02); // Gets harder
+        stability -= decayRate;
+        bar.style.width = stability + '%';
+        
+        if(stability < 30) {
+            bar.style.background = 'red';
+            if(Math.random() < 0.1) playSound('warning'); // Annoying beep
+        } else {
+            bar.style.background = '#00ff00';
+        }
+
+        if (stability <= 0) {
+            gameOver();
+            return;
+        }
+
+        // 2. Calculate Cursor Position based on Curses
+        let targetX = realX;
+        let targetY = realY;
+
+        if (curses.includes('INVERT_X')) targetX = window.innerWidth - realX;
+        if (curses.includes('INVERT_Y')) targetY = window.innerHeight - realY;
+
+        if (curses.includes('DRIFT')) {
+            // Add momentum
+            velX += (targetX - fakeX) * 0.05;
+            velY += (targetY - fakeY) * 0.05;
+            velX *= 0.9; // friction
+            velY *= 0.9;
+            fakeX += velX;
+            fakeY += velY;
+        } else if (curses.includes('LAG')) {
+            // Lerp for delay
+            fakeX += (targetX - fakeX) * 0.1; 
+            fakeY += (targetY - fakeY) * 0.1;
+        } else {
+            fakeX = targetX;
+            fakeY = targetY;
+        }
+
+        // Apply Position
+        cursor.style.left = fakeX + 'px';
+        cursor.style.top = fakeY + 'px';
+
+        // Visual Effects Curses
+        if (curses.includes('SHAKE')) {
+            container.style.transform = `translate(${Math.random()*10-5}px, ${Math.random()*10-5}px)`;
+        } else {
+            container.style.transform = 'none';
+        }
+
+        if (curses.includes('BLINK')) {
+            cursor.style.display = Math.random() > 0.8 ? 'none' : 'block';
+        }
+
+        if (curses.includes('POPUP') && Math.random() < 0.02) {
+            createPopup();
+        }
+
+        requestAnimationFrame(update);
+    }
+
+    function startGame() {
+        score = 0;
+        stability = 100;
+        curses = [];
+        curseList.innerHTML = '';
+        gameRunning = true;
+        overlay.style.display = 'none';
+        moveButton();
+        
+        // Reset mouse trackers
+        fakeX = window.innerWidth/2;
+        fakeY = window.innerHeight/2;
+        
+        playSound('click');
+        update();
+    }
+
+    function gameOver() {
+        gameRunning = false;
+        container.style.transform = 'none';
+        overlay.innerHTML = `
+            <h1 style="font-size:80px">FATAL ERROR</h1>
+            <p style="font-size:30px; color:gold">SYSTEM SURVIVED: ${score} FIXES</p>
+            <p>The rejection was inevitable.</p>
+            <button class="start" onclick="location.reload()">REBOOT SYSTEM</button>
+        `;
+        overlay.style.display = 'flex';
+        document.body.style.backgroundColor = "#0000aa"; // BSOD
+        playSound('error');
+    }
+
+</script>
+
+</body>
+</html>

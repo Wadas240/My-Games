@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECHOLOCATION: The Blind Maze</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            user-select: none;
+        }
+
+        canvas {
+            border: 2px solid #333;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            cursor: none; /* ซ่อนเมาส์เพื่อความสมจริง */
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        h1 { margin: 0; text-shadow: 0 0 10px #fff; font-size: 24px; letter-spacing: 5px; opacity: 0.5; }
+        p { font-size: 14px; color: #888; margin-top: 5px; }
+
+        #noise-meter {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 4px;
+            background: #333;
+        }
+        #noise-fill {
+            height: 100%;
+            width: 0%;
+            background: #ff0000;
+            transition: width 0.2s;
+            box-shadow: 0 0 10px #ff0000;
+        }
+
+        #game-over {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+        .btn {
+            padding: 10px 30px; border: 1px solid #fff; background: transparent; color: #fff;
+            font-family: inherit; font-size: 20px; cursor: pointer; margin-top: 20px;
+            transition: 0.2s;
+        }
+        .btn:hover { background: #fff; color: #000; }
+
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h1>ECHOLOCATION</h1>
+        <p>Spacebar: SONAR PING | Arrows: MOVE | Don't touch walls</p>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="noise-meter"><div id="noise-fill"></div></div>
+
+    <div id="game-over">
+        <h1 id="status-msg" style="font-size: 40px; color: red;">SIGNAL LOST</h1>
+        <p id="sub-msg">You hit a wall in the dark.</p>
+        <button class="btn" onclick="resetGame()">RESTART SYSTEM</button>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // ตั้งค่าขนาดจอ
+    canvas.width = 800;
+    canvas.height = 600;
+
+    // --- Game Variables ---
+    let gameState = 'PLAY'; // PLAY, OVER, WIN
+    let level = 1;
+    
+    // Player
+    let player = { x: 50, y: 50, r: 8, speed: 2, color: '#fff' };
+    
+    // The Hunter (Enemy)
+    let hunter = { x: 0, y: 0, r: 10, speed: 3.5, active: false, targetX: null, targetY: null };
+
+    // World
+    let walls = [];
+    let key = { x: 0, y: 0, r: 10, collected: false };
+    let exit = { x: 0, y: 0, r: 15 };
+    let pings = []; // Sound waves
+
+    // Inputs
+    let keys = {};
+
+    // --- Audio Synth ---
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(type) {
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.connect(g); g.connect(audioCtx.destination);
+        const now = audioCtx.currentTime;
+
+        if (type === 'ping') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(800, now);
+            osc.frequency.exponentialRampToValueAtTime(200, now + 0.5);
+            g.gain.setValueAtTime(0.1, now);
+            g.gain.linearRampToValueAtTime(0, now + 0.5);
+            osc.start(now); osc.stop(now + 0.5);
+        } else if (type === 'die') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(100, now);
+            osc.frequency.linearRampToValueAtTime(0, now + 0.5);
+            g.gain.setValueAtTime(0.2, now);
+            g.gain.linearRampToValueAtTime(0, now + 0.5);
+            osc.start(now); osc.stop(now + 0.5);
+        } else if (type === 'win') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(440, now);
+            osc.frequency.linearRampToValueAtTime(880, now + 0.5);
+            g.gain.setValueAtTime(0.1, now);
+            g.gain.linearRampToValueAtTime(0, now + 0.5);
+            osc.start(now); osc.stop(now + 0.5);
+        } else if (type === 'step') {
+            osc.type = 'square'; // Hunter sound
+            osc.frequency.setValueAtTime(50, now);
+            g.gain.setValueAtTime(0.05, now);
+            g.gain.linearRampToValueAtTime(0, now + 0.1);
+            osc.start(now); osc.stop(now + 0.1);
+        }
+    }
+
+    // --- Generators ---
+    function generateLevel() {
+        walls = [];
+        
+        // Border Walls
+        walls.push({x:0, y:0, w:canvas.width, h:20}); // Top
+        walls.push({x:0, y:canvas.height-20, w:canvas.width, h:20}); // Bottom
+        walls.push({x:0, y:0, w:20, h:canvas.height}); // Left
+        walls.push({x:canvas.width-20, y:0, w:20, h:canvas.height}); // Right
+
+        // Procedural Obstacles (Random Blocks)
+        const count = 20 + (level * 5);
+        for(let i=0; i<count; i++) {
+            let w = Math.random() * 100 + 40;
+            let h = Math.random() * 100 + 40;
+            let x = Math.random() * (canvas.width - w - 100) + 50;
+            let y = Math.random() * (canvas.height - h - 100) + 50;
+            
+            // Don't spawn on player
+            if(Math.hypot(x-player.x, y-player.y) > 150) {
+                walls.push({x, y, w, h, opacity: 0}); // Opacity starts at 0 (invisible)
+            }
+        }
+
+        // Place Key & Exit
+        key.collected = false;
+        placeItem(key);
+        placeItem(exit);
+        
+        // Place Hunter (Far away)
+        do {
+            hunter.x = Math.random() * canvas.width;
+            hunter.y = Math.random() * canvas.height;
+        } while(Math.hypot(hunter.x-player.x, hunter.y-player.y) < 400);
+        hunter.targetX = hunter.x; 
+        hunter.targetY = hunter.y;
+    }
+
+    function placeItem(item) {
+        let placed = false;
+        while(!placed) {
+            item.x = Math.random() * (canvas.width - 100) + 50;
+            item.y = Math.random() * (canvas.height - 100) + 50;
+            
+            // Check collision with walls
+            let safe = true;
+            for(let w of walls) {
+                if(item.x > w.x - 20 && item.x < w.x + w.w + 20 &&
+                   item.y > w.y - 20 && item.y < w.y + w.h + 20) {
+                    safe = false; break;
+                }
+            }
+            if(safe && Math.hypot(item.x-player.x, item.y-player.y) > 200) placed = true;
+        }
+    }
+
+    function createPing() {
+        pings.push({x: player.x, y: player.y, r: 0, maxR: 400, life: 1.0});
+        playSound('ping');
+        
+        // Alert Hunter
+        hunter.targetX = player.x;
+        hunter.targetY = player.y;
+        hunter.active = true;
+        
+        // Update UI Meter
+        document.getElementById('noise-fill').style.width = '100%';
+        setTimeout(() => document.getElementById('noise-fill').style.width = '0%', 500);
+    }
+
+    // --- Core Logic ---
+    function update() {
+        if(gameState !== 'PLAY') return;
+
+        // Player Movement
+        let dx = 0, dy = 0;
+        if(keys['ArrowUp'] || keys['w']) dy = -player.speed;
+        if(keys['ArrowDown'] || keys['s']) dy = player.speed;
+        if(keys['ArrowLeft'] || keys['a']) dx = -player.speed;
+        if(keys['ArrowRight'] || keys['d']) dx = player.speed;
+
+        // Move X
+        player.x += dx;
+        if(checkWallCollision(player)) endGame(false, "You hit a wall.");
+        
+        // Move Y
+        player.y += dy;
+        if(checkWallCollision(player)) endGame(false, "You hit a wall.");
+
+        // Pings Logic
+        for(let i = pings.length - 1; i >= 0; i--) {
+            let p = pings[i];
+            p.r += 8; // Expand speed
+            p.life -= 0.02; // Fade out
+            
+            // Illuminate Walls
+            for(let w of walls) {
+                // Simple check: if wall corners are within ring
+                // Better: Center of wall to ping
+                let cx = w.x + w.w/2;
+                let cy = w.y + w.h/2;
+                let dist = Math.hypot(cx - p.x, cy - p.y);
+                
+                // If wave hits wall (approximate)
+                if(Math.abs(dist - p.r) < 50) {
+                    w.opacity = Math.max(w.opacity, p.life);
+                }
+            }
+
+            if(p.life <= 0) pings.splice(i, 1);
+        }
+
+        // Walls Decay
+        for(let w of walls) {
+            if(w.opacity > 0) w.opacity -= 0.015; // Fade speed
+        }
+
+        // Hunter Logic
+        if(hunter.active) {
+            let distH = Math.hypot(hunter.targetX - hunter.x, hunter.targetY - hunter.y);
+            if(distH > 5) {
+                hunter.x += (hunter.targetX - hunter.x) / distH * hunter.speed;
+                hunter.y += (hunter.targetY - hunter.y) / distH * hunter.speed;
+                if(Math.random() < 0.05) playSound('step'); // Creepy sound
+            } else {
+                hunter.active = false; // Arrived at last known sound
+            }
+
+            // Hunter kills player
+            if(Math.hypot(hunter.x - player.x, hunter.y - player.y) < player.r + hunter.r) {
+                endGame(false, "The Hunter heard you.");
+            }
+        }
+
+        // Key & Exit Logic
+        if(!key.collected && Math.hypot(key.x - player.x, key.y - player.y) < key.r + player.r) {
+            key.collected = true;
+            playSound('win');
+        }
+
+        if(key.collected && Math.hypot(exit.x - player.x, exit.y - player.y) < exit.r + player.r) {
+            level++;
+            playSound('win');
+            resetLevel(); // Next level
+        }
+    }
+
+    function checkWallCollision(p) {
+        for(let w of walls) {
+            if (p.x + p.r > w.x && p.x - p.r < w.x + w.w &&
+                p.y + p.r > w.y && p.y - p.r < w.y + w.h) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function draw() {
+        // Clear (Black)
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw Walls (Only visible based on opacity)
+        for(let w of walls) {
+            if(w.opacity > 0.05) {
+                ctx.strokeStyle = `rgba(255, 255, 255, ${w.opacity})`;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(w.x, w.y, w.w, w.h);
+                
+                // Fill slightly
+                ctx.fillStyle = `rgba(255, 255, 255, ${w.opacity * 0.1})`;
+                ctx.fillRect(w.x, w.y, w.w, w.h);
+            }
+        }
+
+        // Draw Pings
+        for(let p of pings) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+            ctx.strokeStyle = `rgba(0, 255, 0, ${p.life})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // Draw Player (Very faint always visible, so you know where you are)
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, player.r, 0, Math.PI*2);
+        ctx.fillStyle = '#333'; // Dark grey
+        ctx.fill();
+        ctx.strokeStyle = '#555';
+        ctx.stroke();
+
+        // Draw Hunter (Visible only when moving or close?)
+        // Let's make Hunter Invisible unless ping hits it!
+        // But for gameplay fairness, let's make Hunter emit a faint red glow
+        if(hunter.active) {
+            ctx.beginPath();
+            ctx.arc(hunter.x, hunter.y, hunter.r, 0, Math.PI*2);
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+            ctx.fill();
+        }
+
+        // Draw Key & Exit (Only if Ping hits near them)
+        // Simulating visibility by checking distance to active pings
+        let keyVisible = false;
+        let exitVisible = false;
+        for(let p of pings) {
+            if(Math.abs(Math.hypot(key.x - p.x, key.y - p.y) - p.r) < 50) keyVisible = true;
+            if(Math.abs(Math.hypot(exit.x - p.x, exit.y - p.y) - p.r) < 50) exitVisible = true;
+        }
+
+        if(!key.collected) {
+            // Faint glint always
+            ctx.fillStyle = keyVisible ? '#ffff00' : 'rgba(255, 255, 0, 0.1)';
+            ctx.beginPath(); ctx.arc(key.x, key.y, key.r, 0, Math.PI*2); ctx.fill();
+            if(keyVisible) ctx.fillText("KEY", key.x-10, key.y-15);
+        }
+
+        if(key.collected) {
+            // Exit activates
+            ctx.fillStyle = exitVisible ? '#00ffff' : 'rgba(0, 255, 255, 0.1)';
+            ctx.beginPath(); ctx.arc(exit.x, exit.y, exit.r, 0, Math.PI*2); ctx.fill();
+            if(exitVisible) ctx.fillText("EXIT", exit.x-12, exit.y-20);
+        }
+    }
+
+    function resetLevel() {
+        player.x = 50; player.y = 50;
+        pings = [];
+        generateLevel();
+        playSound('ping'); // Start with one ping
+    }
+
+    function resetGame() {
+        level = 1;
+        document.getElementById('game-over').style.display = 'none';
+        gameState = 'PLAY';
+        resetLevel();
+    }
+
+    function endGame(win, msg) {
+        gameState = 'OVER';
+        playSound('die');
+        document.getElementById('status-msg').innerText = win ? "ESCAPED" : "SIGNAL LOST";
+        document.getElementById('status-msg').style.color = win ? "#00ffff" : "#ff0000";
+        document.getElementById('sub-msg').innerText = msg + ` (Level reached: ${level})`;
+        document.getElementById('game-over').style.display = 'flex';
+    }
+
+    // Loop
+    function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+    }
+
+    // Inputs
+    window.addEventListener('keydown', e => {
+        keys[e.key] = true;
+        if(e.code === 'Space' && gameState === 'PLAY') {
+            // Limit ping rate? No, let user spam but attract hunter
+            createPing();
+        }
+    });
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    // Start
+    resetLevel();
+    loop();
+
+</script>
+</body>
+</html>

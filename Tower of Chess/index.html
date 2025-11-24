@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GRANDMASTER: LEGION OF CHESS</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Rajdhani:wght@500;700&display=swap');
+
+        body {
+            margin: 0; background-color: #050505; color: white;
+            font-family: 'Rajdhani', sans-serif; overflow: hidden; user-select: none;
+        }
+
+        /* --- UI LAYOUT --- */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: flex; flex-direction: column;
+            justify-content: space-between;
+        }
+
+        header {
+            background: linear-gradient(to bottom, rgba(0,0,0,0.95), transparent);
+            padding: 15px; text-align: center; pointer-events: auto;
+        }
+        h1 {
+            font-family: 'Cinzel', serif; font-size: 36px; margin: 0;
+            background: linear-gradient(45deg, #00ffff, #ffffff);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 20px rgba(0, 255, 255, 0.5); letter-spacing: 3px;
+        }
+
+        .hud-bar {
+            display: flex; gap: 30px; justify-content: center; margin-top: 5px;
+            font-size: 20px; font-weight: bold; text-shadow: 0 0 10px black;
+        }
+
+        /* Shop Panel (Scrollable) */
+        #control-panel {
+            background: rgba(5, 5, 10, 0.95); border-top: 2px solid #444;
+            padding: 10px 0; pointer-events: auto; height: 140px;
+            overflow-x: auto; /* เลื่อนแนวนอน */
+            white-space: nowrap; display: flex; align-items: center;
+            /* Custom Scrollbar */
+            scrollbar-width: thin; scrollbar-color: #00ffff #222;
+        }
+        #control-panel::-webkit-scrollbar { height: 8px; }
+        #control-panel::-webkit-scrollbar-track { background: #222; }
+        #control-panel::-webkit-scrollbar-thumb { background: #00ffff; border-radius: 4px; }
+
+        .cards-wrapper { display: flex; gap: 10px; padding: 0 20px; }
+
+        .chess-card {
+            min-width: 90px; height: 110px;
+            background: linear-gradient(135deg, #1a1a1a, #0a0a0a);
+            border: 1px solid #444; border-radius: 6px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            cursor: pointer; transition: 0.2s; position: relative;
+        }
+        .chess-card:hover { transform: translateY(-5px); border-color: #fff; background: #222; }
+        .chess-card.selected { border-color: #00ffff; box-shadow: 0 0 15px #00ffff; background: #002222; }
+        .chess-card.locked { opacity: 0.4; filter: grayscale(1); pointer-events: none; }
+
+        .piece-icon { font-size: 40px; margin-bottom: 2px; text-shadow: 0 0 10px rgba(255,255,255,0.3); }
+        .piece-name { font-size: 10px; font-weight: bold; color: #aaa; margin-bottom: 2px; }
+        .piece-cost { color: gold; font-weight: bold; font-size: 12px; }
+        .piece-type { font-size: 9px; position: absolute; top: 4px; right: 4px; color: #555; }
+
+        /* Inspector */
+        #inspector {
+            position: absolute; bottom: 160px; right: 20px;
+            width: 220px; padding: 15px; background: rgba(0, 0, 0, 0.9); 
+            border: 1px solid #00ffff; border-radius: 5px; display: none; pointer-events: auto;
+        }
+        .btn {
+            width: 100%; padding: 8px; border: none; cursor: pointer;
+            font-family: 'Rajdhani', sans-serif; font-weight: bold; font-size: 16px;
+            margin-top: 8px; transition: 0.2s; text-transform: uppercase;
+        }
+        .btn-up { background: #00ffff; color: black; } .btn-up:hover { background: white; }
+        .btn-sell { background: #ff4444; color: white; } .btn-sell:hover { background: #ff0000; }
+
+        /* Speed */
+        .speed-ctrl { position: absolute; top: 90px; right: 20px; pointer-events: auto; display: flex; flex-direction: column; gap: 5px; }
+        .spd-btn { width: 40px; height: 40px; border-radius: 50%; background: #222; border: 1px solid #555; color: white; cursor: pointer; }
+        .spd-btn.active { border-color: #00ff00; color: #00ff00; }
+
+        canvas { display: block; background: radial-gradient(circle at center, #111 0%, #000 100%); }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <header>
+        <h1>LEGION OF CHESS</h1>
+        <div class="hud-bar">
+            <div style="color:#ff4444">♚ <span id="lives">20</span></div>
+            <div style="color:#00ffff">WAVE <span id="wave">1</span></div>
+            <div style="color:gold">💰 <span id="money">800</span></div>
+        </div>
+    </header>
+
+    <div class="speed-ctrl">
+        <button class="spd-btn active" id="spd1" onclick="setSpeed(1)">1x</button>
+        <button class="spd-btn" id="spd2" onclick="setSpeed(2)">2x</button>
+    </div>
+
+    <div id="inspector">
+        <h3 style="color:#00ffff; margin:0 0 5px 0;" id="inspName">UNIT</h3>
+        <div style="font-size:12px; color:#ccc;" id="inspStat"></div>
+        <button class="btn btn-up" id="btnUpgrade" onclick="upgradeTower()">UPGRADE</button>
+        <button class="btn btn-sell" onclick="sellTower()">SELL</button>
+    </div>
+
+    <div id="control-panel">
+        <div class="cards-wrapper" id="shop-container">
+            </div>
+    </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // --- 1. 20 CHARACTERS DATA ---
+    // Types: bullet, splash, laser, slow, dot (poison/fire), buff (aura), money
+    const UNITS = [
+        // CLASSIC SET (Yellow/Standard)
+        { id:0, name:'Pawn', icon:'♟', dmg:10, rng:120, spd:15, cost:50, color:'#ffd700', type:'bullet' },
+        { id:1, name:'Knight', icon:'♞', dmg:25, rng:140, spd:40, cost:150, color:'#e6c200', type:'splash' },
+        { id:2, name:'Bishop', icon:'♝', dmg:5, rng:200, spd:5, cost:250, color:'#ffeb3b', type:'laser' },
+        { id:3, name:'Rook', icon:'♜', dmg:70, rng:250, spd:60, cost:400, color:'#fbc02d', type:'cannon' },
+        { id:4, name:'Queen', icon:'♛', dmg:15, rng:220, spd:8, cost:800, color:'#fff176', type:'omni' }, // Rapid Omni
+
+        // ELEMENTAL SET (Blue/Red)
+        { id:5, name:'Frost Pawn', icon:'❄️', dmg:5, rng:110, spd:20, cost:100, color:'#00ffff', type:'slow' },
+        { id:6, name:'Pyro Rook', icon:'🔥', dmg:40, rng:180, spd:50, cost:450, color:'#ff4400', type:'burn' }, // Dot
+        { id:7, name:'Storm Bishop', icon:'⚡', dmg:15, rng:160, spd:25, cost:350, color:'#aa00ff', type:'chain' }, // Chain Lightning
+        { id:8, name:'Aqua Knight', icon:'💧', dmg:20, rng:130, spd:30, cost:200, color:'#0099ff', type:'splash_slow' },
+        { id:9, name:'Magma King', icon:'🌋', dmg:100, rng:200, spd:80, cost:1200, color:'#ff0000', type:'cannon_burn' },
+
+        // VOID SET (Purple/Dark)
+        { id:10, name:'Void Pawn', icon:'👻', dmg:12, rng:100, spd:12, cost:75, color:'#5500ff', type:'pierce' },
+        { id:11, name:'Dark Knight', icon:'🦇', dmg:60, rng:150, spd:50, cost:500, color:'#3300aa', type:'crit' }, // High Crit
+        { id:12, name:'Warlock', icon:'💀', dmg:30, rng:180, spd:40, cost:600, color:'#220022', type:'curse' }, // Dmg amp
+        { id:13, name:'Assassin', icon:'🗡️', dmg:200, rng:300, spd:120, cost:1500, color:'#880088', type:'sniper' },
+        { id:14, name:'Necro Queen', icon:'🧛‍♀️', dmg:10, rng:200, spd:10, cost:2000, color:'#4b0082', type:'omni_slow' },
+
+        // CYBER/ROYAL SET (Green/White)
+        { id:15, name:'Tech Pawn', icon:'🤖', dmg:8, rng:140, spd:5, cost:120, color:'#00ff00', type:'rapid' },
+        { id:16, name:'Plasma Rook', icon:'🔋', dmg:50, rng:300, spd:0, cost:1000, color:'#00ffaa', type:'beam' }, // Continuous Beam
+        { id:17, name:'King', icon:'♚', dmg:0, rng:100, spd:0, cost:1500, color:'#ffffff', type:'buff_dmg' }, // Buffs Neighbors
+        { id:18, name:'Emperor', icon:'👑', dmg:0, rng:0, spd:0, cost:3000, color:'#daa520', type:'money' }, // Generates Money
+        { id:19, name:'Grandmaster', icon:'🎓', dmg:999, rng:400, spd:100, cost:10000, color:'#ff00ff', type:'god' } // One shot
+    ];
+
+    // --- CONFIG ---
+    const TILE = 50;
+    const GRID_W = 20;
+    const GRID_H = 12;
+    let OFFSET_X = 0, OFFSET_Y = 0;
+
+    // Path
+    const PATH = [
+        {x:0,y:2}, {x:3,y:2}, {x:3,y:8}, {x:8,y:8}, 
+        {x:8,y:3}, {x:14,y:3}, {x:14,y:9}, {x:19,y:9}
+    ];
+
+    // --- STATE ---
+    let money = 800, lives = 20, wave = 1, gameSpeed = 1;
+    let towers = [], enemies = [], projs = [], parts = [], texts = [];
+    let selectedShopIdx = -1, selectedMapTower = null;
+    let spawnQ = 0, spawnT = 0, waveDelay = 0;
+    
+    // --- INIT ---
+    function init() {
+        resize();
+        renderShop();
+        startWave();
+        loop();
+    }
+    window.addEventListener('resize', resize);
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        OFFSET_X = (canvas.width - GRID_W*TILE)/2;
+        OFFSET_Y = (canvas.height - GRID_H*TILE)/2;
+    }
+
+    function renderShop() {
+        const container = document.getElementById('shop-container');
+        container.innerHTML = '';
+        UNITS.forEach((u, i) => {
+            let div = document.createElement('div');
+            div.className = 'chess-card';
+            div.id = 'card' + i;
+            div.innerHTML = `
+                <div class="piece-type">${u.id+1}</div>
+                <div class="piece-icon" style="color:${u.color}">${u.icon}</div>
+                <div class="piece-name">${u.name}</div>
+                <div class="piece-cost">$${u.cost}</div>
+            `;
+            div.onclick = (e) => { e.stopPropagation(); selectShop(i); };
+            container.appendChild(div);
+        });
+    }
+
+    function selectShop(idx) {
+        if(selectedShopIdx === idx) selectedShopIdx = -1;
+        else selectedShopIdx = idx;
+        selectedMapTower = null;
+        updateUI();
+    }
+
+    function startWave() {
+        spawnQ = 5 + Math.floor(wave * 1.5);
+        spawnT = 0;
+    }
+
+    // --- LOOP ---
+    function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+    }
+
+    function update() {
+        for(let s=0; s<gameSpeed; s++) {
+            // 1. Spawner
+            if(spawnQ > 0) {
+                if(++spawnT > 30) {
+                    spawnEnemy();
+                    spawnQ--; spawnT=0;
+                }
+            } else if(enemies.length === 0) {
+                if(++waveDelay > 100) {
+                    wave++;
+                    money += 150 + (wave*10);
+                    // Money Tower Logic
+                    towers.forEach(t => { if(t.type==='money') { money+=100; createFloatText("+$100", t.x, t.y, 'gold'); } });
+                    startWave();
+                    waveDelay = 0;
+                }
+            }
+
+            // 2. Towers
+            towers.forEach(t => {
+                if(t.type === 'money' || t.type === 'buff_dmg') return; // Passive towers
+
+                // Cooldown
+                if(t.cd > 0) t.cd--;
+
+                // Find Target
+                if(!t.target || t.target.hp <= 0 || dist(t, t.target) > t.range) {
+                    t.target = enemies.find(e => dist(t, e) <= t.range);
+                }
+
+                // Attack
+                if(t.target && t.cd <= 0) {
+                    // Apply Buffs (King Aura)
+                    let dmgMult = 1;
+                    towers.forEach(other => {
+                        if(other.type === 'buff_dmg' && dist(t, other) < other.range) dmgMult += 0.5;
+                    });
+
+                    if(t.type === 'laser' || t.type === 'beam') {
+                        t.target.hp -= (t.dmg * dmgMult) / 10;
+                        if(t.target.hp<=0) killEnemy(t.target);
+                    } else {
+                        fireProj(t, t.target, dmgMult);
+                        t.cd = t.maxCd;
+                    }
+                }
+            });
+
+            // 3. Projectiles
+            for(let i=projs.length-1; i>=0; i--) {
+                let p = projs[i];
+                if(!p.target) { projs.splice(i,1); continue; }
+                
+                let ang = Math.atan2(p.target.y-p.y, p.target.x-p.x);
+                p.x += Math.cos(ang)*p.spd; p.y += Math.sin(ang)*p.spd;
+
+                if(dist(p, p.target) < 10) {
+                    hit(p.target, p);
+                    projs.splice(i, 1);
+                }
+            }
+
+            // 4. Enemies
+            for(let i=enemies.length-1; i>=0; i--) {
+                let e = enemies[i];
+                if(e.dead) { enemies.splice(i,1); continue; }
+
+                // Status Effects
+                if(e.slow > 0) e.slow--;
+                if(e.burn > 0) { e.hp -= e.burnDmg; e.burn--; if(e.hp<=0) killEnemy(e); }
+
+                let spd = e.slow > 0 ? e.baseSpd*0.5 : e.baseSpd;
+                
+                // Move
+                let next = PATH[e.idx+1];
+                if(next) {
+                    let tx = OFFSET_X + next.x*TILE + TILE/2;
+                    let ty = OFFSET_Y + next.y*TILE + TILE/2;
+                    let d = Math.hypot(tx-e.x, ty-e.y);
+                    if(d < spd) {
+                        e.x=tx; e.y=ty; e.idx++;
+                        if(e.idx >= PATH.length-1) {
+                            lives--; enemies.splice(i,1);
+                            if(lives<=0) alert("GAME OVER"); 
+                            continue;
+                        }
+                    } else {
+                        e.x += ((tx-e.x)/d)*spd;
+                        e.y += ((ty-e.y)/d)*spd;
+                    }
+                }
+            }
+        }
+
+        // Particles & Text (Visuals run once)
+        updateUI();
+        for(let i=parts.length-1; i>=0; i--) {
+            parts[i].life--; parts[i].x+=parts[i].vx; parts[i].y+=parts[i].vy;
+            if(parts[i].life<=0) parts.splice(i,1);
+        }
+        for(let i=texts.length-1; i>=0; i--) {
+            texts[i].life--; texts[i].y-=0.5;
+            if(texts[i].life<=0) texts.splice(i,1);
+        }
+    }
+
+    // --- DRAW ---
+    function draw() {
+        ctx.fillStyle = '#050505'; ctx.fillRect(0,0,canvas.width, canvas.height);
+
+        // Board
+        for(let y=0; y<GRID_H; y++) {
+            for(let x=0; x<GRID_W; x++) {
+                let px = OFFSET_X + x*TILE, py = OFFSET_Y + y*TILE;
+                ctx.fillStyle = (x+y)%2 ? '#111' : '#1a1a1a';
+                ctx.fillRect(px, py, TILE, TILE);
+                ctx.strokeStyle = '#222'; ctx.strokeRect(px, py, TILE, TILE);
+            }
+        }
+        // Path
+        ctx.beginPath(); ctx.strokeStyle = 'rgba(0,255,255,0.1)'; ctx.lineWidth = 10;
+        let p0 = PATH[0]; ctx.moveTo(OFFSET_X+p0.x*TILE+TILE/2, OFFSET_Y+p0.y*TILE+TILE/2);
+        for(let i=1; i<PATH.length; i++) ctx.lineTo(OFFSET_X+PATH[i].x*TILE+TILE/2, OFFSET_Y+PATH[i].y*TILE+TILE/2);
+        ctx.stroke();
+
+        // Towers
+        towers.forEach(t => {
+            // Range (Selected)
+            if(t===selectedMapTower || (t.type==='buff_dmg')) {
+                ctx.beginPath(); ctx.arc(t.x, t.y, t.range, 0, Math.PI*2);
+                ctx.fillStyle = t.type==='buff_dmg' ? 'rgba(255,215,0,0.05)' : 'rgba(255,255,255,0.1)';
+                ctx.fill(); ctx.strokeStyle = t.color; ctx.lineWidth=1; ctx.stroke();
+            }
+            
+            // Body
+            ctx.fillStyle = '#111'; ctx.fillRect(t.x-20, t.y-20, 40, 40);
+            ctx.strokeStyle = t.color; ctx.lineWidth = 2; ctx.strokeRect(t.x-20, t.y-20, 40, 40);
+            
+            // Icon
+            ctx.fillStyle = t.color; ctx.font = '24px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+            ctx.fillText(t.icon, t.x, t.y);
+
+            // Laser Beam
+            if((t.type === 'laser' || t.type === 'beam') && t.target) {
+                ctx.strokeStyle = t.color; ctx.lineWidth = t.type==='beam'?4:2;
+                ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(t.target.x, t.target.y); ctx.stroke();
+            }
+        });
+
+        // Enemies
+        enemies.forEach(e => {
+            ctx.fillStyle = e.color; ctx.beginPath(); ctx.arc(e.x, e.y, 10, 0, Math.PI*2); ctx.fill();
+            // HP
+            ctx.fillStyle='red'; ctx.fillRect(e.x-10, e.y-15, 20, 3);
+            ctx.fillStyle='#0f0'; ctx.fillRect(e.x-10, e.y-15, 20*(e.hp/e.maxHp), 3);
+        });
+
+        // Projectiles
+        projs.forEach(p => {
+            ctx.fillStyle = p.col; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill();
+        });
+
+        // Particles
+        parts.forEach(p => {
+            ctx.fillStyle = p.col; ctx.globalAlpha = p.life/20;
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+        });
+
+        // Texts
+        texts.forEach(t => {
+            ctx.fillStyle = t.col; ctx.font = 'bold 14px Arial'; ctx.fillText(t.str, t.x, t.y);
+        });
+
+        // Builder Ghost
+        if(selectedShopIdx !== -1) {
+            let u = UNITS[selectedShopIdx];
+            let gx = Math.floor((mx - OFFSET_X) / TILE);
+            let gy = Math.floor((my - OFFSET_Y) / TILE);
+            let tx = OFFSET_X + gx*TILE + TILE/2;
+            let ty = OFFSET_Y + gy*TILE + TILE/2;
+            
+            if(gx>=0 && gx<GRID_W && gy>=0 && gy<GRID_H) {
+                ctx.beginPath(); ctx.arc(tx, ty, u.rng, 0, Math.PI*2);
+                ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fill();
+                ctx.fillStyle = u.color; ctx.globalAlpha=0.5; ctx.fillRect(tx-20, ty-20, 40, 40); ctx.globalAlpha=1;
+            }
+        }
+    }
+
+    // --- LOGIC HELPERS ---
+    function spawnEnemy() {
+        let hp = 50 * Math.pow(1.2, wave);
+        enemies.push({
+            x:OFFSET_X+PATH[0].x*TILE+TILE/2, y:OFFSET_Y+PATH[0].y*TILE+TILE/2, idx:0,
+            hp:hp, maxHp:hp, baseSpd:2+(wave*0.1), slow:0, burn:0, dead:false,
+            color:`hsl(${wave*30}, 100%, 50%)`
+        });
+    }
+
+    function fireProj(t, target, mult) {
+        if(t.type === 'omni' || t.type === 'omni_slow') {
+            // Shoot all in range
+            enemies.forEach(e => {
+                if(dist(t, e) <= t.range) spawnProj(t, e, mult);
+            });
+        } else if (t.type === 'chain') {
+            // Chain lightning simulation (instant hit)
+            let list = [target];
+            // Find neighbor of target
+            let curr = target;
+            for(let i=0; i<3; i++) { // Chain 3 times
+                let next = enemies.find(e => e!==curr && !list.includes(e) && dist(curr, e) < 100);
+                if(next) { list.push(next); curr = next; } else break;
+            }
+            list.forEach(e => {
+                ctx.strokeStyle = t.color; ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(e.x, e.y); ctx.stroke(); // Visual hack
+                hit(e, {dmg:t.dmg*mult, type:'bullet', col:t.color}); // Instant dmg
+            });
+        } else {
+            spawnProj(t, target, mult);
+        }
+    }
+
+    function spawnProj(t, target, mult) {
+        projs.push({
+            x:t.x, y:t.y, target:target, spd:10, dmg:t.dmg*mult, type:t.type, col:t.color
+        });
+    }
+
+    function hit(e, p) {
+        let dmg = p.dmg;
+        if(p.type.includes('crit') && Math.random()<0.2) { dmg *= 3; createFloatText("CRIT!", e.x, e.y-10, 'red'); }
+        
+        if(p.type.includes('splash') || p.type.includes('cannon') || p.type==='god') {
+            explode(e.x, e.y, p.col);
+            enemies.forEach(sub => { if(dist(e, sub) < 80) applyDmg(sub, dmg, p.type); });
+        } else {
+            applyDmg(e, dmg, p.type);
+        }
+    }
+
+    function applyDmg(e, dmg, type) {
+        e.hp -= dmg;
+        createFloatText(Math.ceil(dmg), e.x, e.y, '#fff');
+        if(type.includes('slow')) e.slow = 60;
+        if(type.includes('burn')) { e.burn = 100; e.burnDmg = dmg/5; }
+        if(e.hp<=0 && !e.dead) killEnemy(e);
+    }
+
+    function killEnemy(e) {
+        e.dead = true;
+        money += 10 + wave;
+        explode(e.x, e.y, e.color);
+    }
+
+    function explode(x, y, c) {
+        for(let i=0; i<5; i++) parts.push({x:x, y:y, vx:(Math.random()-0.5)*5, vy:(Math.random()-0.5)*5, life:20, col:c, r:Math.random()*3});
+    }
+
+    function createFloatText(s, x, y, c) { texts.push({str:s, x:x, y:y, col:c, life:30}); }
+    function dist(a, b) { return Math.hypot(a.x-b.x, a.y-b.y); }
+
+    // --- UI INTERACTIONS ---
+    function updateUI() {
+        document.getElementById('money').innerText = Math.floor(money);
+        document.getElementById('lives').innerText = lives;
+        document.getElementById('wave').innerText = wave;
+        
+        // Update Shop
+        UNITS.forEach((u, i) => {
+            let el = document.getElementById('card'+i);
+            if(i === selectedShopIdx) el.classList.add('selected'); else el.classList.remove('selected');
+            if(money < u.cost) el.style.opacity = 0.5; else el.style.opacity = 1;
+        });
+    }
+
+    function checkPlacement(gx, gy) {
+        if(gx<0 || gx>=GRID_W || gy<0 || gy>=GRID_H) return false;
+        // Check Path
+        for(let i=0; i<PATH.length-1; i++) {
+            // Simple AABB check for path segment vs grid cell
+            let p1=PATH[i], p2=PATH[i+1];
+            let minX = Math.min(p1.x, p2.x), maxX = Math.max(p1.x, p2.x);
+            let minY = Math.min(p1.y, p2.y), maxY = Math.max(p1.y, p2.y);
+            if(gx >= minX && gx <= maxX && gy >= minY && gy <= maxY) return false;
+        }
+        // Check Towers
+        let px = OFFSET_X + gx*TILE + TILE/2;
+        let py = OFFSET_Y + gy*TILE + TILE/2;
+        return !towers.some(t => Math.abs(t.x-px)<5 && Math.abs(t.y-py)<5);
+    }
+
+    // Inputs
+    let mx=0, my=0;
+    window.addEventListener('mousemove', e => { mx=e.clientX; my=e.clientY; });
+    
+    canvas.addEventListener('mousedown', e => {
+        if(my < OFFSET_Y || my > OFFSET_Y + GRID_H*TILE) return;
+
+        let gx = Math.floor((mx - OFFSET_X) / TILE);
+        let gy = Math.floor((my - OFFSET_Y) / TILE);
+        let px = OFFSET_X + gx*TILE + TILE/2;
+        let py = OFFSET_Y + gy*TILE + TILE/2;
+
+        if(selectedShopIdx !== -1) {
+            let u = UNITS[selectedShopIdx];
+            if(money >= u.cost && checkPlacement(gx, gy)) {
+                money -= u.cost;
+                towers.push({
+                    x:px, y:py, name:u.name, icon:u.icon,
+                    dmg:u.dmg, range:u.rng, maxCd:u.spd, cd:0, cost:u.cost,
+                    color:u.color, type:u.type, level:1, target:null
+                });
+                explode(px, py, 'white');
+            }
+        } else {
+            // Select Tower
+            selectedMapTower = null;
+            towers.forEach(t => { if(dist({x:px, y:py}, t) < 20) selectedMapTower = t; });
+            updateInspector();
+        }
+    });
+
+    function updateInspector() {
+        let el = document.getElementById('inspector');
+        if(selectedMapTower) {
+            el.style.display = 'block';
+            document.getElementById('inspName').innerText = selectedMapTower.name;
+            document.getElementById('inspStat').innerText = `DMG: ${Math.floor(selectedMapTower.dmg)} | LVL: ${selectedMapTower.level}`;
+            document.getElementById('btnUpgrade').innerText = `UPGRADE ($${selectedMapTower.cost * selectedMapTower.level})`;
+            document.getElementById('btnUpgrade').onclick = () => {
+                let cost = selectedMapTower.cost * selectedMapTower.level;
+                if(money >= cost) {
+                    money -= cost;
+                    selectedMapTower.level++;
+                    selectedMapTower.dmg *= 1.5;
+                    updateInspector();
+                }
+            };
+        } else {
+            el.style.display = 'none';
+        }
+    }
+
+    function sellTower() {
+        if(selectedMapTower) {
+            money += Math.floor(selectedMapTower.cost * 0.7);
+            towers.splice(towers.indexOf(selectedMapTower), 1);
+            selectedMapTower = null; updateInspector();
+        }
+    }
+
+    function setSpeed(s) {
+        gameSpeed = s;
+        document.getElementById('spd1').classList.toggle('active', s===1);
+        document.getElementById('spd2').classList.toggle('active', s===2);
+    }
+
+    // Start
+    init();
+
+</script>
+</body>
+</html>
